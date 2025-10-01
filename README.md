@@ -1,2 +1,2 @@
-# GAS-Community-Scraiping
-scraiping from AppSheet Community
+# GAS-Scraiping
+業務効率化のスクレイピング
