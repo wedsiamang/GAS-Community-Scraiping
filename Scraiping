@@ -1,0 +1,144 @@
+function topicsScraiping() {
+   const sheet = SpreadsheetApp.openById('')
+     .getSheetByName("");
+   const lastRow = sheet.getLastRow();
+
+ //Date 
+  const now = new Date();
+  const past = new Date(now.getTime() - (60 * 60 * 1000));
+  
+  // スクレイピング先の2ページを読み込む
+  const url = ["URL1ページ目" , "URL２ページ目"];
+  const values = [];
+  for(let i = 0;i<url.length;i++){
+
+  const json = JSON.parse(UrlFetchApp.fetch(url[i]).getContentText());
+  const topics = json.topic_list.topics || [];   
+
+  const categories = {121:'AppSheet Q&A', 122:'Tips & Trics', 123:'Release Notes', 124:'Announce'};
+  
+
+  for (const t of topics) {
+    Utilities.sleep(300); // API負荷軽減
+  //  if (t.pinned) continue; // ピン留め投稿はスキップ
+  
+  const isPinned = t.pinned?'📌':'';
+// 解決済みマーク
+    const isSolved = t.has_accepted_answer ? '✅' : '';
+
+    const id = String(t.id);
+    //const exists = exDataId.includes(id); // 既にシートにあるか？
+  
+    const replyCount = t.posts_count - 1;
+
+    const count20 =t.posts_count>20?'🟥':'';
+      
+
+    // 詳細情報を取得
+    const url2 = `https://discuss.google.dev/t/${t.slug}/${t.id}/50.json`;
+    const json2 = JSON.parse(UrlFetchApp.fetch(url2).getContentText());
+    const posts = json2.post_stream?.posts || [];
+
+    // 最初の投稿の本文
+    const cooked0 = posts[0]?.cooked || '';
+    const cook = cooked0.replace(/<[^>]+>/g, '').trim();
+
+    // 最新の返信本文
+    const lastPosts = posts[posts.length - 1];
+      
+    let latestReply = '';
+    if (posts.length > 1) {  
+      latestReply = (lastPosts.cooked || '').replace(/<[^>]+>/g, '').trim();
+    }
+
+    // answer
+    const answer = (json2.accepted_answer?.excerpt || '').replace(/<[^>]+>/g, '').trim();
+  
+    // 表示用の日付文字列
+    const createdAtStr  = Utilities.formatDate(new Date(t.created_at),'Asia/Tokyo', 'yy/MM/dd HH:mm');
+    const latestTimeStr = Utilities.formatDate(new Date(t.last_posted_at),'Asia/Tokyo', 'MM/dd HH:mm');
+    
+    const category  = categories[t.category_id] || '';
+    const tags      = Array.isArray(t.tags) ? t.tags.join(', ') : '';
+    
+    //1hour のreplyをカウント
+    const repCount = [];
+
+    for(const p of posts){
+  
+     // staff
+    const staffPost = 
+    p?.staff === true ||
+    p?.admin === true ||
+    p?.moderator === true ||
+    p?.group_moderator === true ||
+    p?.primary_group_name === "google_staff" ||
+    p?.flair_name === "google_staff" ||
+    p?.flair_group_id === 32
+    ;
+    const createBy = (staffPost && p.post_number === 1)?true:false;
+    const islastpost = (p.post_number === p.posts_count  || json2.details.last_poster.username === p.username)?p.post_number:'';
+  if(p.post_count>50)continue; 
+     const isStaff = (staffPost && islastpost)?true:false;
+     const sDetail = isStaff?p.cooked:'';
+     const lastPost = islastpost?p.cooked:'';
+    // Logger.log("las"+las);
+     const rep = p.post_number;
+     const update = new Date(p.updated_at);
+     const count = update >= past ? rep : null;
+     repCount.push([count,isStaff,sDetail,lastPost,createBy]);
+   }
+   const repArray = repCount.map(r => r[0]);
+   //Logger.log("rep"+repCount);
+   const staffarray=repCount.map(s => s[1]); 
+   const detailArray = repCount.map(d => d[2]);
+   const lastRepArray = repCount.map(l => l[3]);
+   const createArray = repCount.map(c => c[4]);
+  const lasRep = lastRepArray.pop();
+  const detRep =detailArray.pop();
+
+   const filterRep = repArray.filter(f => f != null);
+   const replyIncrease = filterRep.length > 0 ? filterRep.length-1 : '';
+   const isStaff = staffarray.includes(true)?'👬':'';
+   const staffDetail = detRep.replace(/<[^>]+>/g, '').trim();
+   const lastDetail = lasRep.replace(/<[^>]+>/g, '').trim();
+   const createdBy = createArray.includes(true)?'👬':'';
+
+  Logger.log("l"+lastDetail);
+ 
+    // 1行分のデータを配列として作成
+     values.push([
+     isPinned,
+     createdBy,
+     createdAtStr,                          // A: created_time
+     id,                                    // B: id
+     category,                              // C: category
+     latestTimeStr,                         // D: latest_time
+     t.title,                               // E: title
+     LanguageApp.translate(t.title, 'en', 'ja'),  // F: translated_title
+     replyCount,                            // G: reply
+     replyIncrease,  
+     count20,                       
+     tags,                                  
+     isStaff,                             
+     `https://discuss.google.dev/t/${t.slug}/${t.id}`, // K: url
+      isSolved,                              // L: solved
+      LanguageApp.translate(cook, 'en', 'ja'),         // M: first_post_detail
+      LanguageApp.translate(latestReply , 'en', 'ja'), // N: latest_reply_post_detail
+      LanguageApp.translate(answer , 'en', 'ja'), // O: answer_post_detail
+      LanguageApp.translate(staffDetail , 'en', 'ja'), // P: staff_post_detail
+   //   trigger
+     ]);
+   }
+  }
+// 2行目以下を全削除（ヘッダーは1行目だけ残す）
+ 
+ const lr = sheet.getLastRow();
+ if (lr > 1) sheet.deleteRows(2, lr - 1);
+// 最新データを書き込む（2行目から）
+if (values.length > 0) {
+  sheet.insertRowsAfter(2, values.length);
+  sheet.getRange(2, 1, values.length, values[0].length).setValues(values);
+
+}
+}
